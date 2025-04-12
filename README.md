@@ -31,6 +31,13 @@ Or using `go`:
 $ go install github.com/ndavd/agevault@latest
 ```
 
+Or using `docker`:
+
+```
+$ docker build -t agevault .
+$ docker run --rm -it -u ${UID}:${GID} -v .:/tmp agevault
+```
+
 ## Usage
 
 ```
