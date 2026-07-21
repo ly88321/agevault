@@ -9,8 +9,7 @@ Like age, it features no config options, allowing for a straightforward secure f
 
 ## Disclaimer
 
-**Use it at your own risk!** (see
-[LICENSE](https://github.com/ndavd/agevault/blob/main/LICENSE))
+**Use it at your own risk!** (see [LICENSE](https://github.com/ndavd/agevault/blob/main/LICENSE))
 
 Also, this is a project in early-development and hasn't been thoroughly tested. So far, I've tested
 it on Linux.
@@ -20,6 +19,12 @@ it on Linux.
 Always install the latest release to make sure you have the latest security improvements and fixes.
 If the update has the same major version (e.g. `v1.x.x`), then it's guaranteed to be backwards
 compatible.
+
+Run using Nix:
+
+```text
+$ nix run github:ndavd/agevault
+```
 
 Download the pre-built binaries from the
 [latest release](https://github.com/ndavd/agevault/releases/latest).
