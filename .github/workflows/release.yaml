@@ -1,27 +1,74 @@
-name: goreleaser
+name: Release
+
 on:
   push:
-    tags:
-      - '*'
+    tags: ["v*"]
+
 permissions:
   contents: write
+
 jobs:
-  goreleaser:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            extension: tar.gz
+          - goos: linux
+            goarch: arm64
+            extension: tar.gz
+          - goos: darwin
+            goarch: amd64
+            extension: tar.gz
+          - goos: darwin
+            goarch: arm64
+            extension: tar.gz
+          - goos: windows
+            goarch: amd64
+            extension: zip
+          - goos: windows
+            goarch: arm64
+            extension: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Test
+        run: go test ./...
+      - name: Build and package
+        shell: bash
+        run: |
+          name="agevault-${{ matrix.goos }}-${{ matrix.goarch }}"
+          binary="agevault"
+          if [ "${{ matrix.goos }}" = "windows" ]; then binary="agevault.exe"; fi
+          GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$binary" .
+          if [ "${{ matrix.extension }}" = "zip" ]; then zip "$name.zip" "$binary"; else tar -czf "$name.tar.gz" "$binary"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agevault-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: agevault-*.${{ matrix.extension }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.x'
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
+          path: release
+          merge-multiple: true
+      - name: Create or update GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --generate-notes
+          fi
