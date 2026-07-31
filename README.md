@@ -1,78 +1,55 @@
 # agevault
 
-`agevault` is a directory encryption tool using [age](https://github.com/FiloSottile/age) file
-encryption.
+`agevault` encrypts and restores one directory at a time using [age](https://age-encryption.org/).
+It creates `vault.age` for encrypted data and, by default, `.vault.age` for the passphrase-protected identity.
 
-It locks/unlocks a vault (directory) with a passphrase-protected identity file.
+## Important security notes
 
-Like age, it features no config options, allowing for a straightforward secure flow.
+- Keep the hidden identity file and its passphrase in separate, secure backups. Without both, a vault cannot be recovered.
+- The identity file contains a public recipient and an encrypted private identity. The public part lets `lock` run without prompting; `unlock` requires the passphrase.
+- File overwriting is not a guaranteed secure-delete mechanism, particularly on SSDs, networked storage, synced folders, or filesystems with snapshots. Use full-disk encryption and appropriate backup policies for sensitive data.
 
-## Disclaimer
+## Install
 
-**Use it at your own risk!** (see [LICENSE](https://github.com/ndavd/agevault/blob/main/LICENSE))
-
-Also, this is a project in early-development and hasn't been thoroughly tested. So far, I've tested
-it on Linux.
-
-## Installation
-
-Always install the latest release to make sure you have the latest security improvements and fixes.
-If the update has the same major version (e.g. `v1.x.x`), then it's guaranteed to be backwards
-compatible.
-
-Run using Nix:
+Download a release binary, or build locally:
 
 ```text
-$ nix run github:ndavd/agevault
-```
-
-Download the pre-built binaries from the
-[latest release](https://github.com/ndavd/agevault/releases/latest).
-
-Or using `go`:
-
-```text
-$ go install github.com/ndavd/agevault@latest
-```
-
-Or using `docker`:
-
-```text
-$ docker build -t agevault .
-$ docker run --rm -it -u ${UID}:${GID} -v .:/tmp agevault
+go build -trimpath -ldflags="-s -w" -o agevault .
 ```
 
 ## Usage
 
 ```text
-lock/unlock directory with passphrase-protected identity file
-usage: agevault [directory-name] lock|unlock|keygen
+agevault [directory-name] lock|unlock|keygen [--key identity-file]
 ```
 
-Securing `my-vault/`:
-
-1. Generate identity file
+### Create an identity
 
 ```text
-$ agevault my-vault keygen
-create identity passphrase: 
-confirm identity passphrase: 
-.age14tpkpl6vexufah8eq5dgrd5zy4xqs4slynh26j5n7gvxs87xhguqwu9zqc.my-vault.key.age CREATED (do not change the filename)
+agevault documents keygen
 ```
 
-2. Lock vault
+This creates `.documents.age`. Use `--key` to choose a different identity-file path:
 
 ```text
-$ agevault my-vault lock
-my-vault LOCKED with age14tpkpl6vexufah8eq5dgrd5zy4xqs4slynh26j5n7gvxs87xhguqwu9zqc
+agevault documents keygen --key .vault-key.age
 ```
 
-3. Unlock vault
+### Lock and unlock
 
 ```text
-$ agevault my-vault unlock
-enter passphrase for identity file ".age14tpkpl6vexufah8eq5dgrd5zy4xqs4slynh26j5n7gvxs87xhguqwu9zqc.my-vault.key.age": 
-my-vault UNLOCKED
+agevault documents lock
+agevault documents unlock
 ```
 
-4. That's it. Do your changes, lock it again, etc.
+`lock` reads the public recipient from the identity file and does not prompt. `unlock` prompts for the identity-file passphrase.
+
+If the default identity file is unavailable, pass its path explicitly:
+
+```text
+agevault documents unlock --key D:\secure-backup\vault-key.age
+```
+
+## Compatibility
+
+Existing legacy identity-file and `.av` metadata pairs remain readable. New identities use the single-file format above.

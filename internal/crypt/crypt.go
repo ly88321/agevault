@@ -1,10 +1,12 @@
 package crypt
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"filippo.io/age"
@@ -12,19 +14,44 @@ import (
 )
 
 func EncryptToFile(destinationFilename string, data []byte, recipient age.Recipient) error {
-	file, err := os.Create(destinationFilename)
+	return EncryptToFileFromReader(destinationFilename, bytes.NewReader(data), recipient)
+}
+
+// EncryptToFileFromReader writes an encrypted file atomically. The destination is
+// replaced only after encryption, flushing, and closing have all succeeded.
+func EncryptToFileFromReader(destinationFilename string, source io.Reader, recipient age.Recipient) (err error) {
+	directory := filepath.Dir(destinationFilename)
+	file, err := os.CreateTemp(directory, ".agevault-*")
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	temporaryFilename := file.Name()
+	defer func() {
+		file.Close()
+		if err != nil {
+			_ = os.Remove(temporaryFilename)
+		}
+	}()
+	if err = file.Chmod(0o600); err != nil {
+		return err
+	}
 	writeCloser, err := age.Encrypt(file, recipient)
 	if err != nil {
 		return err
 	}
-	if _, err = writeCloser.Write(data); err != nil {
+	if _, err = io.Copy(writeCloser, source); err != nil {
 		return err
 	}
-	return writeCloser.Close()
+	if err = writeCloser.Close(); err != nil {
+		return err
+	}
+	if err = file.Sync(); err != nil {
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryFilename, destinationFilename)
 }
 
 func DecryptToWriter(destinationWriter io.Writer, encryptedDataReader io.Reader, identity age.Identity) error {

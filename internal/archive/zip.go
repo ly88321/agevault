@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func UnZip(inputReader bytes.Reader, outputDestination string) error {
@@ -29,20 +28,27 @@ func UnZip(inputReader bytes.Reader, outputDestination string) error {
 }
 
 func unzipFile(f *zip.File, destination string) error {
+	if filepath.IsAbs(f.Name) {
+		return fmt.Errorf("absolute archive path: %s", f.Name)
+	}
 	path := filepath.Join(destination, f.Name)
-	if !strings.HasPrefix(path, filepath.Clean(destination)+string(os.PathSeparator)) {
-		return fmt.Errorf("invalid file path: %s", path)
+	relativePath, err := filepath.Rel(destination, path)
+	if err != nil || relativePath == ".." || len(relativePath) > 2 && relativePath[:3] == ".."+string(os.PathSeparator) {
+		return fmt.Errorf("invalid archive path: %s", f.Name)
 	}
 	if f.FileInfo().IsDir() {
-		if err := os.MkdirAll(path, os.ModePerm); err != nil {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			return err
 		}
 		return nil
 	}
+	if !f.Mode().IsRegular() {
+		return fmt.Errorf("unsupported archive entry type for %s", f.Name)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
 		return err
 	}
-	destinationFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	destinationFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.Mode().Perm())
 	if err != nil {
 		return err
 	}
