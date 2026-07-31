@@ -17,15 +17,28 @@ func ShredFile(path string, iterations int) error {
 	}
 	info, err := file.Stat()
 	if err != nil {
+		_ = file.Close()
 		return err
 	}
-	random := make([]byte, info.Size())
+	bufferSize := int64(1024 * 1024)
+	if info.Size() < bufferSize {
+		bufferSize = info.Size()
+	}
+	random := make([]byte, bufferSize)
 	for i := 0; i < iterations; i++ {
-		if _, err = rand.Read(random); err != nil {
-			return err
-		}
-		if _, err = file.WriteAt(random, 0); err != nil {
-			return err
+		for offset := int64(0); offset < info.Size(); offset += int64(len(random)) {
+			if _, err = rand.Read(random); err != nil {
+				_ = file.Close()
+				return err
+			}
+			length := int64(len(random))
+			if remaining := info.Size() - offset; remaining < length {
+				length = remaining
+			}
+			if _, err = file.WriteAt(random[:int(length)], offset); err != nil {
+				_ = file.Close()
+				return err
+			}
 		}
 		if err = file.Sync(); err != nil {
 			return err
@@ -47,7 +60,9 @@ func ShredDir(path string, iterations int) error {
 			return err
 		}
 		if !d.IsDir() && d.Type().IsRegular() {
-			ShredFile(path, iterations)
+			if err := ShredFile(path, iterations); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
