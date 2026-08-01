@@ -7,6 +7,6 @@
     taplo.enable = true;
     rumdl-format.enable = true;
     yamlfmt.enable = true;
-    gofmt.enable = true;
+    gofumpt.enable = true;
   };
 }

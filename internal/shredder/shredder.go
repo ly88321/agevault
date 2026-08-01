@@ -11,7 +11,7 @@ import (
 )
 
 func ShredFile(path string, iterations int) error {
-	file, err := os.OpenFile(path, os.O_WRONLY, 0644)
+	file, err := os.OpenFile(path, os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -20,7 +20,7 @@ func ShredFile(path string, iterations int) error {
 		return err
 	}
 	random := make([]byte, info.Size())
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		if _, err = rand.Read(random); err != nil {
 			return err
 		}
