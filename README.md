@@ -9,10 +9,12 @@ Like age, it features no config options, allowing for a straightforward secure f
 
 ## Disclaimer
 
-**Use it at your own risk!** (see [LICENSE](https://github.com/ndavd/agevault/blob/main/LICENSE))
+This project has been tested, but has not undergone a formal security audit, and none is planned.
 
-Also, this is a project in early-development and hasn't been thoroughly tested. So far, I've tested
-it on Linux.
+The codebase is intentionally kept simple and readable, so you're encouraged to review it yourself
+before relying on it for anything sensitive.
+
+**Use at your own risk** (see [LICENSE](./LICENSE)).
 
 ## Installation
 
@@ -20,22 +22,23 @@ Always install the latest release to make sure you have the latest security impr
 If the update has the same major version (e.g. `v1.x.x`), then it's guaranteed to be backwards
 compatible.
 
-Run using Nix:
+### Download the pre-built binaries
+
+Get them from the [latest release](https://github.com/ndavd/agevault/releases/latest).
+
+### Using `nix`
 
 ```text
 $ nix run github:ndavd/agevault
 ```
 
-Download the pre-built binaries from the
-[latest release](https://github.com/ndavd/agevault/releases/latest).
-
-Or using `go`:
+### Using `go`
 
 ```text
 $ go install github.com/ndavd/agevault@latest
 ```
 
-Or using `docker`:
+### Using `docker`
 
 ```text
 $ docker build -t agevault .
@@ -76,3 +79,23 @@ my-vault UNLOCKED
 ```
 
 4. That's it. Do your changes, lock it again, etc.
+
+## Design
+
+`agevault` relies entirely on `age` for the cryptography involved, inheriting its security. It
+provides the minimal infrastructure required for `age` to work as a directory encryption tool.
+
+`agevault` uses a passphrase encrypted identity for a few key reasons:
+
+- Extra security factor: Having the encrypted identity file or the passphrase by itself is useless.
+- Easier to lock: If only symmetric encryption was used, the user would need the passphrase to lock
+  as well; this way, the vault can be locked without entering the passphrase.
+- Ability to support multiple keys in the future ([planned features](#planned-features)): This makes
+  it possible to support multiple passphrases, each corresponding to its own key, so multiple people
+  could _own_ the vault: any one of them can lock it, and any one of them can unlock it with their
+  own passphrase.
+
+## Planned features
+
+- Post-quantum keys
+- Multi-user vault support
