@@ -1,11 +1,11 @@
 # agevault
 
-`agevault` is a directory encryption tool using [age](https://github.com/FiloSottile/age) file
+`agevault` is a directory encryption tool using [`age`](https://github.com/FiloSottile/age) file
 encryption.
 
 It locks/unlocks a vault (directory) with a passphrase-protected identity file.
 
-Like age, it features no config options, allowing for a straightforward secure flow.
+Like `age`, it features no config options, allowing for a straightforward secure flow.
 
 ## Disclaimer
 
@@ -14,7 +14,7 @@ This project has been tested, but has not undergone a formal security audit, and
 The codebase is intentionally kept simple and readable, so you're encouraged to review it yourself
 before relying on it for anything sensitive.
 
-**Use at your own risk** (see [LICENSE](./LICENSE)).
+**Use at your own risk** (see [`LICENSE`](./LICENSE)).
 
 ## Installation
 
