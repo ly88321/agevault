@@ -44,17 +44,13 @@ func getIdentityFilename(trimmedVaultName string) (string, error) {
 	return identityFilename, nil
 }
 
-func Keygen(trimmedVaultName string) (string, error) {
+func Keygen(trimmedVaultName string, passphrase string) (string, error) {
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
 		return "", err
 	}
 	identityFilename := fmt.Sprintf(".%s.%s.key.age", identity.Recipient().String(), trimmedVaultName)
-	pw, err := crypt.ReadSecret("identity passphrase", true)
-	if err != nil {
-		return "", err
-	}
-	scryptRecipient, err := age.NewScryptRecipient(pw)
+	scryptRecipient, err := age.NewScryptRecipient(passphrase)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +92,7 @@ func Lock(vaultName string, trimmedVaultName string) (string, error) {
 	return recipientString, nil
 }
 
-func Unlock(vaultName string, trimmedVaultName string) error {
+func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identityFilename string) (string, error)) error {
 	identityFilename, err := getIdentityFilename(trimmedVaultName)
 	if err != nil {
 		return err
@@ -114,14 +110,14 @@ func Unlock(vaultName string, trimmedVaultName string) error {
 	if err != nil {
 		return fmt.Errorf("could not read identity file: %s", err.Error())
 	}
-	pw, err := crypt.ReadSecret(
-		fmt.Sprintf("enter passphrase for identity file \"%s\"", identityFilename),
-		false,
-	)
+	passphrase, err := getPassphrase(identityFilename)
 	if err != nil {
 		return err
 	}
-	scryptIdentity, err := age.NewScryptIdentity(pw)
+	scryptIdentity, err := age.NewScryptIdentity(passphrase)
+	if err != nil {
+		return err
+	}
 	var identityBuffer bytes.Buffer
 	if err = crypt.DecryptToWriter(&identityBuffer, encryptedIdentity, scryptIdentity); err != nil {
 		return fmt.Errorf("bad passphrase: %s", err.Error())
@@ -173,7 +169,11 @@ func main() {
 	trimmedVaultName := strings.Trim(vaultName, ". ")
 
 	if trimmedVaultName != "" && action == "keygen" {
-		identityFilename, err := Keygen(trimmedVaultName)
+		pw, err := crypt.ReadSecret("identity passphrase", true)
+		if err != nil {
+			errMsg(err)
+		}
+		identityFilename, err := Keygen(trimmedVaultName, pw)
 		if err != nil {
 			errMsg(err)
 		}
@@ -191,7 +191,12 @@ func main() {
 	}
 
 	if trimmedVaultName != "" && action == "unlock" {
-		err := Unlock(vaultName, trimmedVaultName)
+		err := Unlock(vaultName, trimmedVaultName, func(identityFilename string) (string, error) {
+			return crypt.ReadSecret(
+				fmt.Sprintf("enter passphrase for identity file \"%s\"", identityFilename),
+				false,
+			)
+		})
 		if err != nil {
 			errMsg(err)
 		}
