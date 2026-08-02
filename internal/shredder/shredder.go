@@ -11,6 +11,9 @@ import (
 )
 
 func ShredFile(path string, iterations int) error {
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
 	file, err := os.OpenFile(path, os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
