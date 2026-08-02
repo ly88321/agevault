@@ -1,11 +1,14 @@
 module github.com/ndavd/agevault
 
-go 1.23.0
-
-require filippo.io/age v1.2.0
+go 1.24.0
 
 require (
-	golang.org/x/crypto v0.24.0 // indirect
-	golang.org/x/sys v0.23.0 // indirect
-	golang.org/x/term v0.23.0 // indirect
+	filippo.io/age v1.3.1
+	golang.org/x/term v0.37.0
+)
+
+require (
+	filippo.io/hpke v0.4.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 )

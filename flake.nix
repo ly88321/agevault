@@ -31,7 +31,7 @@
             pname = "agevault";
             version = "1.1.1";
             src = ./.;
-            vendorHash = "sha256-jiSYg4+RLzezW1D1kWxmNoEn0rlbXRzU3BsK16aP0tw=";
+            vendorHash = "sha256-yt4K+EcoZMJ36E5qolZdbDoeWp1WhVzppVx6nDrFq2s=";
           };
         in
         {
