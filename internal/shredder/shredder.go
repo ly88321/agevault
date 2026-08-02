@@ -47,7 +47,9 @@ func ShredDir(path string, iterations int) error {
 			return err
 		}
 		if !d.IsDir() && d.Type().IsRegular() {
-			ShredFile(path, iterations)
+			if err := ShredFile(path, iterations); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
