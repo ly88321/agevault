@@ -32,6 +32,7 @@ func Usage() {
 	fmt.Println("usage: agevault [directory-name] lock|unlock|keygen [-pq] [--key identity-file] [--keep-ciphertext]")
 	fmt.Println()
 	fmt.Println("-pq generates hybrid post-quantum keys; --key selects an identity file")
+	fmt.Println("--keep-ciphertext is only for unlock and preserves the encrypted archive")
 	os.Exit(0)
 }
 
@@ -180,7 +181,7 @@ func lockWithOptions(vaultName, trimmedVaultName string, password func(string) (
 	encryptedFilename := fmt.Sprintf("%s.age", vaultName)
 	encryptedExists, encryptedIsDir := utils.Exists(encryptedFilename)
 	if encryptedExists && !encryptedIsDir {
-		return nil, errors.New("already locked")
+		return nil, errors.New("encrypted vault already exists; refusing to overwrite it or erase the source directory")
 	}
 	vaultExists, vaultIsDir := utils.Exists(vaultName)
 	if !vaultExists || !vaultIsDir {
