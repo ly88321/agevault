@@ -5,15 +5,24 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 func safeName(name, vault string) (string, error) {
 	clean := path.Clean(name)
-	if strings.ContainsAny(name, `\\:`) || strings.HasPrefix(name, "/") || clean == ".." || strings.HasPrefix(clean, "../") || (clean != vault && !strings.HasPrefix(clean, vault+"/")) {
+	if strings.ContainsRune(name, 0) || strings.HasPrefix(name, "/") || clean == ".." || strings.HasPrefix(clean, "../") || (clean != vault && !strings.HasPrefix(clean, vault+"/")) {
 		return "", fmt.Errorf("invalid archive path: %s", name)
 	}
-	// Reject Windows device names, ADS and trailing-dot/space aliases on all platforms.
+	// POSIX names containing ':' or backslashes are ordinary filenames. Preserve
+	// them on POSIX for legacy compatibility; Windows must reject device/ADS aliases.
+	if runtime.GOOS != "windows" {
+		return clean, nil
+	}
+	if strings.ContainsAny(name, `\\:<>"|?*`) || !filepath.IsLocal(filepath.FromSlash(clean)) {
+		return "", fmt.Errorf("unsafe Windows archive path: %s", name)
+	}
 	for _, part := range strings.Split(clean, "/") {
 		base := strings.ToUpper(strings.Split(part, ".")[0])
 		if strings.TrimRight(part, ". ") != part || base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || (len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '0' && base[3] <= '9') {

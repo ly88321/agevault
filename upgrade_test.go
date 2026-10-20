@@ -25,7 +25,7 @@ func TestSharingAndExplicitKeys(t *testing.T) {
 			}
 			os.WriteFile("vault/foo.txt", []byte(testFooContent), 0600)
 			for _, key := range []string{"alice.age", "bob.age"} {
-				if _, err := Lock("vault", "vault"); err != nil {
+				if _, err := lockWithPassphrase("vault", "vault", constPassphrase, key); err != nil {
 					t.Fatal(err)
 				}
 				if err := Unlock("vault", "vault", constPassphrase, key); err != nil {
@@ -66,7 +66,7 @@ func TestForkIdentityCompatibility(t *testing.T) {
 				}{1, "custom.age", id.Recipient().String()})
 				os.WriteFile(".vault.av", data, 0600)
 			}
-			if _, err := Lock("vault", "vault"); err != nil {
+			if _, err := lockWithPassphrase("vault", "vault", constPassphrase); err != nil {
 				t.Fatal(err)
 			}
 			if err := Unlock("vault", "vault", constPassphrase); err != nil {
@@ -83,7 +83,7 @@ func TestFailedUnlockRetainsCiphertext(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile("vault/foo.txt", bytes.Repeat([]byte("x"), 100000), 0600)
-	if _, err = Lock("vault", "vault"); err != nil {
+	if _, err = lockWithPassphrase("vault", "vault", constPassphrase); err != nil {
 		t.Fatal(err)
 	}
 	original, _ := os.ReadFile("vault.age")
@@ -143,7 +143,7 @@ func TestLargeFileStreamingRoundtrip(t *testing.T) {
 	}
 	f.Close()
 	want := h.Sum(nil)
-	if _, err = Lock("vault", "vault"); err != nil {
+	if _, err = lockWithPassphrase("vault", "vault", constPassphrase); err != nil {
 		t.Fatal(err)
 	}
 	if err = Unlock("vault", "vault", constPassphrase, key); err != nil {
@@ -184,7 +184,7 @@ func TestMalformedLegacyRecipient(t *testing.T) {
 	runInIsolatedDir(t)
 	os.Mkdir("vault", 0700)
 	os.WriteFile(".vault.age", []byte(`{"Version":1,"Recipient":"   ","EncryptedIdentity":""}`), 0600)
-	if _, err := Lock("vault", "vault"); err == nil {
+	if _, err := lockWithPassphrase("vault", "vault", constPassphrase); err == nil {
 		t.Fatal("empty legacy recipient accepted")
 	}
 }

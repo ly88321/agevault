@@ -83,7 +83,7 @@ func TestUnlockFixtures(t *testing.T) {
 				t.Fatalf("Unlock() failed: %v", err)
 			}
 			// NOTE: Lock again so that older fixtures get migrated
-			if _, err := Lock(testVaultName, testVaultName); err != nil {
+			if _, err := lockWithPassphrase(testVaultName, testVaultName, constPassphrase); err != nil {
 				t.Fatalf("Lock() failed: %v", err)
 			}
 			if err := Unlock(testVaultName, testVaultName, constPassphrase); err != nil {
@@ -110,7 +110,7 @@ func TestLockUnlock(t *testing.T) {
 			if _, _, err := Keygen(testVaultName, testVaultName, testPassphrase, postQuantum); err != nil {
 				t.Fatalf("Keygen() failed: %v", err)
 			}
-			if _, err := Lock(testVaultName, testVaultName); err != nil {
+			if _, err := lockWithPassphrase(testVaultName, testVaultName, constPassphrase); err != nil {
 				t.Fatalf("Lock() failed: %v", err)
 			}
 			if err := Unlock(testVaultName, testVaultName, constPassphrase); err != nil {
@@ -153,7 +153,7 @@ func TestLockRefusesHardLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Lock(testVaultName, testVaultName); err == nil {
+	if _, err := lockWithPassphrase(testVaultName, testVaultName, constPassphrase); err == nil {
 		t.Fatal("Lock() succeeded, want hard link error")
 	}
 	if got, _ := os.ReadFile("outside.txt"); string(got) != testFooContent {

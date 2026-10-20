@@ -47,6 +47,9 @@ func TarDirectory(inputSource string, destinationWriter io.Writer) error {
 			return err
 		}
 		header.Name = filepath.ToSlash(relativePath)
+		if _, err = safeName(header.Name, filepath.Base(source)); err != nil {
+			return err
+		}
 		if err := writer.WriteHeader(header); err != nil {
 			return err
 		}

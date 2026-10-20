@@ -39,12 +39,16 @@ func errMsg(err error) {
 	os.Exit(1)
 }
 
+var errMissingIdentity = errors.New("missing identity file")
+
 func getIdentityFilename(trimmedVaultName string, explicit ...string) (string, error) {
 	if len(explicit) > 0 && explicit[0] != "" {
 		return explicit[0], nil
 	}
-	if _, err := os.Stat("." + trimmedVaultName + ".age"); err == nil {
+	if _, err := os.Lstat("." + trimmedVaultName + ".age"); err == nil {
 		return "." + trimmedVaultName + ".age", nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 	var metadata struct {
 		Version int
@@ -55,6 +59,8 @@ func getIdentityFilename(trimmedVaultName string, explicit ...string) (string, e
 			return "", errors.New("invalid vault metadata; specify --key")
 		}
 		return metadata.KeyFile, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 	identityFilename, err := utils.FileMatchInCwd(func(filename string) bool {
 		return strings.HasSuffix(filename, fmt.Sprintf(".%s.key.age", trimmedVaultName))
@@ -63,31 +69,9 @@ func getIdentityFilename(trimmedVaultName string, explicit ...string) (string, e
 		return "", err
 	}
 	if identityFilename == "" {
-		return "", errors.New("missing identity file")
+		return "", errMissingIdentity
 	}
 	return identityFilename, nil
-}
-
-// NOTE: Ensure backwards compatibility with versions before v1.2.0, where the recipient was in the identity filename
-func migrateLegacyRecipient(vaultName string, trimmedVaultName string) error {
-	missingErr := fmt.Errorf("missing %s, run keygen first", filepath.Join(vaultName, recipients.FileName))
-	identityFilename, err := getIdentityFilename(trimmedVaultName)
-	if err != nil {
-		return missingErr
-	}
-	parts := strings.Split(filepath.Base(identityFilename), ".")
-	if len(parts) < 4 {
-		return missingErr
-	}
-	recipient, err := age.ParseX25519Recipient(parts[1])
-	if err != nil {
-		return missingErr
-	}
-	if err = recipients.Append(vaultName, trimmedVaultName, recipient); err != nil {
-		return fmt.Errorf("could not add recipient: %s", err.Error())
-	}
-	fmt.Printf("found deprecated recipient format, migrated to %s...\n", filepath.Join(vaultName, recipients.FileName))
-	return nil
 }
 
 func generateIdentity(postQuantum bool) (fmt.Stringer, recipients.Recipient, error) {
@@ -106,6 +90,10 @@ func generateIdentity(postQuantum bool) (fmt.Stringer, recipients.Recipient, err
 }
 
 func Keygen(vaultName string, trimmedVaultName string, passphrase string, postQuantum bool, explicit ...string) (string, string, error) {
+	return keygenWithPassphrase(vaultName, trimmedVaultName, passphrase, postQuantum, identityPassphrase, explicit...)
+}
+
+func keygenWithPassphrase(vaultName, trimmedVaultName, passphrase string, postQuantum bool, password func(string) (string, error), explicit ...string) (string, string, error) {
 	encryptedExists, encryptedIsDir := utils.Exists(fmt.Sprintf("%s.age", vaultName))
 	if encryptedExists && !encryptedIsDir {
 		return "", "", errors.New("vault is locked, unlock it first")
@@ -119,9 +107,11 @@ func Keygen(vaultName string, trimmedVaultName string, passphrase string, postQu
 	// Preserve the original recipient when adding a key to an unlocked legacy vault.
 	if _, e := os.Stat(filepath.Join(vaultName, recipients.FileName)); errors.Is(e, os.ErrNotExist) {
 		if _, e = getIdentityFilename(trimmedVaultName); e == nil {
-			if e = migrateRecipient(vaultName, trimmedVaultName); e != nil {
+			if e = migrateRecipient(vaultName, trimmedVaultName, password); e != nil {
 				return "", "", e
 			}
+		} else if !errors.Is(e, errMissingIdentity) {
+			return "", "", e
 		}
 	}
 	// NOTE: age refuses to mix post-quantum and X25519 recipients
@@ -163,7 +153,15 @@ func Keygen(vaultName string, trimmedVaultName string, passphrase string, postQu
 	return identityFilename, fingerprint, nil
 }
 
+func identityPassphrase(filename string) (string, error) {
+	return crypt.ReadSecret(fmt.Sprintf("enter passphrase for identity file %q", filename), false)
+}
+
 func Lock(vaultName string, trimmedVaultName string, explicit ...string) ([]age.Recipient, error) {
+	return lockWithPassphrase(vaultName, trimmedVaultName, identityPassphrase, explicit...)
+}
+
+func lockWithPassphrase(vaultName, trimmedVaultName string, password func(string) (string, error), explicit ...string) ([]age.Recipient, error) {
 	encryptedFilename := fmt.Sprintf("%s.age", vaultName)
 	encryptedExists, encryptedIsDir := utils.Exists(encryptedFilename)
 	if encryptedExists && !encryptedIsDir {
@@ -173,15 +171,65 @@ func Lock(vaultName string, trimmedVaultName string, explicit ...string) ([]age.
 	if !vaultExists || !vaultIsDir {
 		return nil, fmt.Errorf("missing %s", vaultName)
 	}
+	// Validate the selected identity even when public recipients already exist.
+	// Old forks allowed identities in the vault, so keygen's check is insufficient.
+	identityFilename, err := lockIdentityFilename(trimmedVaultName, explicit...)
+	if err != nil {
+		return nil, err
+	}
+	if identityFilename != "" {
+		if err = keyOutsideVault(identityFilename, vaultName); err != nil {
+			return nil, err
+		}
+	}
+	// Discovery may be ambiguous in a shared vault. Check every discoverable
+	// legacy identity rather than ignoring symlinks just because no single key is selected.
+	if len(explicit) == 0 || explicit[0] == "" {
+		entries, e := os.ReadDir(".")
+		if e != nil {
+			return nil, e
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), "."+trimmedVaultName+".key.age") {
+				if e = keyOutsideVault(entry.Name(), vaultName); e != nil {
+					return nil, e
+				}
+			}
+		}
+	}
+	var selected recipients.Recipient
+	if len(explicit) > 0 && explicit[0] != "" {
+		selected, err = recipientFromIdentity(identityFilename, password)
+		if err != nil {
+			return nil, err
+		}
+	}
 	recipientList, err := recipients.Read(vaultName)
 	if errors.Is(err, os.ErrNotExist) {
-		if err = migrateRecipient(vaultName, trimmedVaultName, explicit...); err != nil {
+		if selected != nil {
+			err = recipients.Append(vaultName, trimmedVaultName, selected)
+		} else {
+			err = migrateRecipient(vaultName, trimmedVaultName, password, explicit...)
+		}
+		if err != nil {
 			return nil, err
 		}
 		recipientList, err = recipients.Read(vaultName)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("could not read recipients: %s", err.Error())
+		return nil, fmt.Errorf("could not read recipients: %w", err)
+	}
+	if selected != nil {
+		found := false
+		for _, r := range recipientList {
+			if public, ok := r.(fmt.Stringer); ok && public.String() == selected.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, errors.New("selected identity is not in vault recipients; add its public recipient before locking")
+		}
 	}
 	archiveReader, archiveWriter := io.Pipe()
 	defer archiveReader.Close()
@@ -261,6 +309,13 @@ func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identi
 	}
 	if _, e := os.Lstat(vaultName); !errors.Is(e, os.ErrNotExist) {
 		return errors.New("vault destination exists or is inaccessible")
+	}
+	stagedInfo, e := os.Lstat(filepath.Join(staging, vaultName))
+	if e != nil {
+		return e
+	}
+	if !stagedInfo.IsDir() || stagedInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("archive must contain the expected vault directory")
 	}
 	if err = syncTree(staging); err != nil {
 		return err
@@ -403,40 +458,67 @@ func readIdentity(filename string, password func(string) (string, error)) (age.I
 	}
 	return ids[0], nil
 }
-func migrateRecipient(vault, trimmed string, explicit ...string) error {
+
+// Public legacy metadata is a hint, never proof of which private identity is usable.
+func migrateRecipient(vault, trimmed string, password func(string) (string, error), explicit ...string) error {
 	filename, err := getIdentityFilename(trimmed, explicit...)
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(filename)
+	if err = keyOutsideVault(filename, vault); err != nil {
+		return err
+	}
+	recipient, err := recipientFromIdentity(filename, password)
 	if err != nil {
 		return err
 	}
-	var envelope struct {
-		Version   int
-		Recipient string
-	}
-	if json.Unmarshal(data, &envelope) == nil && envelope.Version == 1 && envelope.Recipient != "" {
-		list, e := parsePublicRecipient(envelope.Recipient)
-		if e != nil {
-			return e
-		}
-		return recipients.Append(vault, trimmed, list[0].(recipients.Recipient))
-	}
-	// Metadata from the fork stored the public recipient separately.
-	var metadata struct {
-		Version   int
-		Recipient string
-	}
-	if data, e := os.ReadFile("." + trimmed + ".av"); e == nil && json.Unmarshal(data, &metadata) == nil && metadata.Version == 1 && metadata.Recipient != "" {
-		list, e := parsePublicRecipient(metadata.Recipient)
-		if e != nil {
-			return e
-		}
-		return recipients.Append(vault, trimmed, list[0].(recipients.Recipient))
-	}
-	return migrateLegacyRecipient(vault, trimmed)
+	return recipients.Append(vault, trimmed, recipient)
 }
+
+func recipientFromIdentity(filename string, password func(string) (string, error)) (recipients.Recipient, error) {
+	identity, err := readIdentity(filename, password)
+	if err != nil {
+		return nil, err
+	}
+	switch id := identity.(type) {
+	case *age.X25519Identity:
+		return id.Recipient(), nil
+	case *age.HybridIdentity:
+		return id.Recipient(), nil
+	default:
+		return nil, errors.New("unsupported vault identity type")
+	}
+}
+
+// Public-only shared vaults need no local private identity. Explicit keys and
+// known legacy locations must still be checked before destructive locking.
+func lockIdentityFilename(trimmed string, explicit ...string) (string, error) {
+	if len(explicit) > 0 && explicit[0] != "" {
+		return explicit[0], nil
+	}
+	filename := "." + trimmed + ".age"
+	if _, err := os.Lstat(filename); err == nil {
+		return filename, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	data, err := os.ReadFile("." + trimmed + ".av")
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var metadata struct {
+		Version int
+		KeyFile string
+	}
+	if json.Unmarshal(data, &metadata) != nil || metadata.Version != 1 || metadata.KeyFile == "" {
+		return "", errors.New("invalid legacy metadata; specify --key")
+	}
+	return metadata.KeyFile, nil
+}
+
 func syncTree(directory string) error {
 	return filepath.WalkDir(directory, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -454,16 +536,6 @@ func syncTree(directory string) error {
 	})
 }
 
-func parsePublicRecipient(text string) ([]age.Recipient, error) {
-	list, err := age.ParseRecipients(strings.NewReader(text))
-	if err != nil {
-		return nil, err
-	}
-	if len(list) != 1 {
-		return nil, errors.New("expected one legacy recipient")
-	}
-	return list, nil
-}
 func keyOutsideVault(key, vault string) error {
 	parent, err := filepath.EvalSymlinks(filepath.Dir(key))
 	if err != nil {
@@ -472,6 +544,18 @@ func keyOutsideVault(key, vault string) error {
 	realKey, err := filepath.Abs(filepath.Join(parent, filepath.Base(key)))
 	if err != nil {
 		return err
+	}
+	if _, e := os.Lstat(key); e == nil {
+		realKey, err = filepath.EvalSymlinks(key)
+		if err != nil {
+			return err
+		}
+		realKey, err = filepath.Abs(realKey)
+		if err != nil {
+			return err
+		}
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return e
 	}
 	realVault, err := filepath.EvalSymlinks(vault)
 	if err != nil {

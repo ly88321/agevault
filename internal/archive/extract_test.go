@@ -6,11 +6,16 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestRejectUnsafeArchives(t *testing.T) {
-	for _, name := range []string{"../escape", "/absolute", "other/file", "vault/../../escape", `vault\..\escape`, "vault/file:ads", "vault/CON", "vault/trailing.", "vault/trailing "} {
+	names := []string{"../escape", "/absolute", "other/file", "vault/../../escape", `vault\..\escape`}
+	if runtime.GOOS == "windows" {
+		names = append(names, "vault/file:ads", "vault/CON", "vault/trailing.", "vault/trailing ")
+	}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			var b bytes.Buffer
 			w := tar.NewWriter(&b)
