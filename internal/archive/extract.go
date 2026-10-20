@@ -2,6 +2,7 @@ package archive
 
 import (
 	"fmt"
+	"github.com/ndavd/agevault/internal/storage"
 	"io"
 	"os"
 	"path"
@@ -31,11 +32,11 @@ func safeName(name, vault string) (string, error) {
 	}
 	return clean, nil
 }
-func extractFile(root *os.Root, name string, r io.Reader, size int64) error {
-	if err := root.MkdirAll(path.Dir(name), 0700); err != nil {
+func extractFile(root *os.Root, name string, r io.Reader, size int64, ops storage.Operations) error {
+	if err := ops.MkdirAll(root, path.Dir(name), 0700); err != nil {
 		return err
 	}
-	f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	f, err := ops.OpenFile(root, name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -49,6 +50,9 @@ func extractFile(root *os.Root, name string, r io.Reader, size int64) error {
 		return err
 	}
 	if err = f.Sync(); err != nil {
+		return err
+	}
+	if err = ops.Reach(storage.ExtractFileSynced); err != nil {
 		return err
 	}
 	return f.Close()

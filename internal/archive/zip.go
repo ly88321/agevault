@@ -4,11 +4,15 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"github.com/ndavd/agevault/internal/storage"
 	"io"
 	"os"
 )
 
 func UnZip(inputReader bytes.Reader, outputDestination string, vaultName string) error {
+	return UnZipWithOperations(inputReader, outputDestination, vaultName, storage.OS())
+}
+func UnZipWithOperations(inputReader bytes.Reader, outputDestination, vaultName string, ops storage.Operations) error {
 	reader, err := zip.NewReader(&inputReader, inputReader.Size())
 	if err != nil {
 		return err
@@ -24,7 +28,7 @@ func UnZip(inputReader bytes.Reader, outputDestination string, vaultName string)
 			return e
 		}
 		if f.FileInfo().IsDir() {
-			if e = root.MkdirAll(name, 0700); e != nil {
+			if e = ops.MkdirAll(root, name, 0700); e != nil {
 				return e
 			}
 			continue
@@ -36,7 +40,7 @@ func UnZip(inputReader bytes.Reader, outputDestination string, vaultName string)
 		if e != nil {
 			return e
 		}
-		e = extractFile(root, name, r, -1)
+		e = extractFile(root, name, r, -1, ops)
 		closeErr := r.Close()
 		if e != nil {
 			return e

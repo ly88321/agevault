@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ndavd/agevault/internal/storage"
 	"github.com/ndavd/agevault/internal/utils"
 )
 
@@ -74,6 +75,9 @@ func TarDirectory(inputSource string, destinationWriter io.Writer) error {
 }
 
 func UnTar(input io.Reader, outputDestination string, vaultName string) error {
+	return UnTarWithOperations(input, outputDestination, vaultName, storage.OS())
+}
+func UnTarWithOperations(input io.Reader, outputDestination, vaultName string, ops storage.Operations) error {
 	root, err := os.OpenRoot(outputDestination)
 	if err != nil {
 		return err
@@ -94,11 +98,11 @@ func UnTar(input io.Reader, outputDestination string, vaultName string) error {
 		}
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err = root.MkdirAll(name, 0700); err != nil {
+			if err = ops.MkdirAll(root, name, 0700); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err = extractFile(root, name, reader, h.Size); err != nil {
+			if err = extractFile(root, name, reader, h.Size, ops); err != nil {
 				return err
 			}
 		default:

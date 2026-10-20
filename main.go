@@ -17,6 +17,7 @@ import (
 	"github.com/ndavd/agevault/internal/crypt"
 	"github.com/ndavd/agevault/internal/recipients"
 	"github.com/ndavd/agevault/internal/shredder"
+	"github.com/ndavd/agevault/internal/storage"
 	"github.com/ndavd/agevault/internal/utils"
 )
 
@@ -28,7 +29,7 @@ func Usage() {
 	fmt.Printf("agevault %s", Version())
 	fmt.Println()
 	fmt.Println("lock/unlock directory with passphrase-protected identity file")
-	fmt.Println("usage: agevault [directory-name] lock|unlock|keygen [-pq] [--key identity-file]")
+	fmt.Println("usage: agevault [directory-name] lock|unlock|keygen [-pq] [--key identity-file] [--keep-ciphertext]")
 	fmt.Println()
 	fmt.Println("-pq generates hybrid post-quantum keys; --key selects an identity file")
 	os.Exit(0)
@@ -161,7 +162,21 @@ func Lock(vaultName string, trimmedVaultName string, explicit ...string) ([]age.
 	return lockWithPassphrase(vaultName, trimmedVaultName, identityPassphrase, explicit...)
 }
 
+type vaultOptions struct {
+	keepCiphertext bool
+	disk           storage.Operations
+	shredDir       func(string, int) error
+	shredFile      func(string, int) error
+}
+
+func defaultVaultOptions() vaultOptions {
+	return vaultOptions{disk: storage.OS(), shredDir: shredder.ShredDir, shredFile: shredder.ShredFile}
+}
+
 func lockWithPassphrase(vaultName, trimmedVaultName string, password func(string) (string, error), explicit ...string) ([]age.Recipient, error) {
+	return lockWithOptions(vaultName, trimmedVaultName, password, defaultVaultOptions(), explicit...)
+}
+func lockWithOptions(vaultName, trimmedVaultName string, password func(string) (string, error), options vaultOptions, explicit ...string) ([]age.Recipient, error) {
 	encryptedFilename := fmt.Sprintf("%s.age", vaultName)
 	encryptedExists, encryptedIsDir := utils.Exists(encryptedFilename)
 	if encryptedExists && !encryptedIsDir {
@@ -239,7 +254,7 @@ func lockWithPassphrase(vaultName, trimmedVaultName string, password func(string
 		archiveWriter.CloseWithError(e)
 		archiveErr <- e
 	}()
-	if err = crypt.EncryptToFileFromReader(encryptedFilename, archiveReader, recipientList...); err != nil {
+	if err = crypt.EncryptToFileFromReaderWithOperations(encryptedFilename, archiveReader, options.disk, recipientList...); err != nil {
 		archiveReader.CloseWithError(err)
 		<-archiveErr
 		return nil, fmt.Errorf("could not encrypt: %w", err)
@@ -247,13 +262,22 @@ func lockWithPassphrase(vaultName, trimmedVaultName string, password func(string
 	if err = <-archiveErr; err != nil {
 		return nil, err
 	}
-	if err = shredder.ShredDir(vaultName, 3); err != nil {
-		return nil, fmt.Errorf("could not shred %s: %s", vaultName, err.Error())
+	if err = options.disk.Reach(storage.LockBeforeShred); err != nil {
+		return nil, err
+	}
+	if err = options.shredDir(vaultName, 3); err != nil {
+		return nil, fmt.Errorf("could not shred %s: %w", vaultName, err)
+	}
+	if err = options.disk.Reach(storage.LockAfterShred); err != nil {
+		return nil, err
 	}
 	return recipientList, nil
 }
 
 func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identityFilename string) (string, error), explicit ...string) error {
+	return unlockWithOptions(vaultName, trimmedVaultName, getPassphrase, defaultVaultOptions(), explicit...)
+}
+func unlockWithOptions(vaultName, trimmedVaultName string, getPassphrase func(string) (string, error), options vaultOptions, explicit ...string) (err error) {
 	identityFilename, err := getIdentityFilename(trimmedVaultName, explicit...)
 	if err != nil {
 		return err
@@ -263,9 +287,9 @@ func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identi
 		return errors.New("already unlocked")
 	}
 	encryptedVaultFilename := fmt.Sprintf("%s.age", vaultName)
-	encryptedVault, err := os.Open(encryptedVaultFilename)
+	encryptedVault, err := options.disk.OpenRead(encryptedVaultFilename)
 	if err != nil {
-		return fmt.Errorf("missing encrypted %s: %s", vaultName, err.Error())
+		return fmt.Errorf("could not open encrypted %s: %w", vaultName, err)
 	}
 	defer encryptedVault.Close()
 	identity, err := readIdentity(identityFilename, getPassphrase)
@@ -276,11 +300,15 @@ func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identi
 	if err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(".", ".agevault-unlock-*")
+	staging, err := options.disk.MkdirTemp(".", ".agevault-unlock-*")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(staging)
+	defer func() {
+		if cleanupErr := options.disk.RemoveAll(staging); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("could not clean private staging directory %q: %w", staging, cleanupErr))
+		}
+	}()
 	reader := bufio.NewReader(plaintext)
 	header, err := reader.Peek(4)
 	if err != nil {
@@ -292,17 +320,20 @@ func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identi
 		if e != nil {
 			return e
 		}
-		if err = archive.UnZip(*bytes.NewReader(data), staging, vaultName); err != nil {
+		if err = archive.UnZipWithOperations(*bytes.NewReader(data), staging, vaultName, options.disk); err != nil {
 			return err
 		}
 	} else {
-		if err = archive.UnTar(reader, staging, vaultName); err != nil {
+		if err = archive.UnTarWithOperations(reader, staging, vaultName, options.disk); err != nil {
 			return err
 		}
 		// tar stops at its end marker; drain age to authenticate the final chunk.
 		if _, err = io.Copy(io.Discard, reader); err != nil {
 			return err
 		}
+	}
+	if err = options.disk.Reach(storage.UnlockAuthenticated); err != nil {
+		return err
 	}
 	if err = encryptedVault.Close(); err != nil {
 		return err
@@ -317,19 +348,34 @@ func Unlock(vaultName string, trimmedVaultName string, getPassphrase func(identi
 	if !stagedInfo.IsDir() || stagedInfo.Mode()&os.ModeSymlink != 0 {
 		return errors.New("archive must contain the expected vault directory")
 	}
-	if err = syncTree(staging); err != nil {
+	if err = syncTreeWithOperations(staging, options.disk); err != nil {
 		return err
 	}
-	if err = os.Rename(filepath.Join(staging, vaultName), vaultName); err != nil {
+	if err = options.disk.Reach(storage.UnlockBeforePublish); err != nil {
 		return err
 	}
-	if err = utils.SyncDir("."); err != nil {
+	if err = options.disk.Rename(filepath.Join(staging, vaultName), vaultName); err != nil {
 		return err
 	}
-	if err = shredder.ShredFile(encryptedVaultFilename, 1); err != nil {
-		return fmt.Errorf("could not shred %s: %s", encryptedVaultFilename, err.Error())
+	if err = options.disk.Reach(storage.UnlockPublished); err != nil {
+		return err
 	}
-	return nil
+	if err = options.disk.SyncDir("."); err != nil {
+		return err
+	}
+	if err = options.disk.Reach(storage.UnlockDirectorySynced); err != nil {
+		return err
+	}
+	if options.keepCiphertext {
+		return options.disk.Reach(storage.UnlockComplete)
+	}
+	if err = options.disk.Reach(storage.UnlockBeforeCipherRemoval); err != nil {
+		return err
+	}
+	if err = options.shredFile(encryptedVaultFilename, 1); err != nil {
+		return fmt.Errorf("vault restored; could not shred %s: %w", encryptedVaultFilename, err)
+	}
+	return options.disk.Reach(storage.UnlockComplete)
 }
 
 func main() {
@@ -352,25 +398,11 @@ func main() {
 
 	badArgsError := errors.New("bad args")
 
-	postQuantum := false
-	explicitKey := ""
-	for i := 2; i < len(args); i++ {
-		switch args[i] {
-		case "-pq":
-			if action != "keygen" {
-				errMsg(badArgsError)
-			}
-			postQuantum = true
-		case "--key":
-			i++
-			if i >= len(args) {
-				errMsg(badArgsError)
-			}
-			explicitKey = args[i]
-		default:
-			errMsg(badArgsError)
-		}
+	cli, err := parseOptions(action, args[2:])
+	if err != nil {
+		errMsg(err)
 	}
+	postQuantum, explicitKey := cli.postQuantum, cli.key
 	if strings.ContainsAny(args[0], `/\\`) || !filepath.IsLocal(args[0]) || vaultName == "." {
 		errMsg(errors.New("directory name must not contain a path"))
 	}
@@ -405,16 +437,21 @@ func main() {
 	}
 
 	if action == "unlock" {
-		err := Unlock(vaultName, trimmedVaultName, func(identityFilename string) (string, error) {
+		options := defaultVaultOptions()
+		options.keepCiphertext = cli.keepCiphertext
+		err := unlockWithOptions(vaultName, trimmedVaultName, func(identityFilename string) (string, error) {
 			return crypt.ReadSecret(
 				fmt.Sprintf("enter passphrase for identity file \"%s\"", identityFilename),
 				false,
 			)
-		}, explicitKey)
+		}, options, explicitKey)
 		if err != nil {
 			errMsg(err)
 		}
 		fmt.Printf("%s UNLOCKED\n", vaultName)
+		if cli.keepCiphertext {
+			fmt.Printf("%s.age RETAINED (existing ciphertext is never overwritten by lock)\n", vaultName)
+		}
 		return
 	}
 
@@ -519,20 +556,23 @@ func lockIdentityFilename(trimmed string, explicit ...string) (string, error) {
 	return metadata.KeyFile, nil
 }
 
-func syncTree(directory string) error {
+func syncTreeWithOperations(directory string, ops storage.Operations) error {
 	return filepath.WalkDir(directory, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			return utils.SyncDir(path)
+			return ops.SyncDir(path)
 		}
-		f, err := os.OpenFile(path, os.O_RDWR, 0)
+		f, err := ops.OpenSync(path)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		return f.Sync()
+		if err = f.Sync(); err != nil {
+			return err
+		}
+		return f.Close()
 	})
 }
 
@@ -573,4 +613,37 @@ func keyOutsideVault(key, vault string) error {
 		return errors.New("identity path conflicts with ciphertext")
 	}
 	return nil
+}
+
+type cliOptions struct {
+	postQuantum    bool
+	keepCiphertext bool
+	key            string
+}
+
+func parseOptions(action string, args []string) (cliOptions, error) {
+	var result cliOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-pq":
+			if action != "keygen" {
+				return result, errors.New("-pq is only valid for keygen")
+			}
+			result.postQuantum = true
+		case "--keep-ciphertext":
+			if action != "unlock" {
+				return result, errors.New("--keep-ciphertext is only valid for unlock")
+			}
+			result.keepCiphertext = true
+		case "--key":
+			i++
+			if i >= len(args) || args[i] == "" || strings.HasPrefix(args[i], "--") {
+				return result, errors.New("--key requires an identity path")
+			}
+			result.key = args[i]
+		default:
+			return result, fmt.Errorf("unknown option: %s", args[i])
+		}
+	}
+	return result, nil
 }
