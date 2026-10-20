@@ -52,6 +52,8 @@ class FakeAPI(GitHub):
         if path == "/releases/1":
             if method == "PATCH":
                 self.release.update(payload)
+                if "tag_name" not in payload:
+                    self.release["tag_name"] = "untagged-placeholder"
             return copy.deepcopy(self.release)
         if path.startswith("/releases/1/assets?"):
             return copy.deepcopy(self.assets)
@@ -108,6 +110,19 @@ class ReleaseTests(unittest.TestCase):
         self.sync()
         self.assertEqual(SHA, self.api.release["target_commitish"])
         self.assertEqual(["PATCH"], [m[0] for m in self.api.mutations])
+
+    def test_placeholder_draft_reused_without_duplicate_release_or_tag(self):
+        self.sync()
+        self.api.release["tag_name"] = "untagged-placeholder"
+        self.api.release["target_commitish"] = "b" * 40
+        self.api.mutations.clear()
+        self.sync()
+        self.sync()
+        self.assertEqual(VERSION, self.api.release["tag_name"])
+        self.assertEqual(SHA, self.api.release["target_commitish"])
+        self.assertEqual(["PATCH", "PATCH"], [m[0] for m in self.api.mutations])
+        self.assertEqual(7, len(self.api.assets))
+        self.assertEqual([], self.api.refs)
 
     def test_published_release_or_changed_notes_or_duplicates_block_writes(self):
         self.sync()
