@@ -44,10 +44,10 @@ class GitHub:
             page += 1
 
 
-def assert_unpublished(release):
+def assert_unpublished(release, allow_placeholder=False):
     if release.get("draft") is not True or release.get("published_at") is not None:
         raise ValueError("Release is not an unpublished draft; refusing changes")
-    if release["tag_name"] != VERSION:
+    if release["tag_name"] != VERSION and not (allow_placeholder and release["tag_name"].startswith("untagged-")):
         raise ValueError("Unexpected release version")
 
 
@@ -87,16 +87,20 @@ def sync_draft(api, sha, directory, notes):
         raise ValueError("SHA256SUMS does not match all six packages")
     expected = dict(checksums, SHA256SUMS=digest(directory / "SHA256SUMS"))
     assert_main_without_tag(api, sha)
-    matches = [release for release in api.items("/releases") if release["tag_name"] == VERSION]
+    # GitHub can return a temporary tag_name for drafts that have no Git tag.
+    # Recognize that same named draft so a retry cannot create a second release.
+    matches = [release for release in api.items("/releases")
+               if release["tag_name"] == VERSION or
+               (release.get("name") == VERSION and release["tag_name"].startswith("untagged-"))]
     if len(matches) > 1:
         raise ValueError("Multiple matching releases; refusing changes")
     if matches:
         release = api.request(f"/releases/{matches[0]['id']}")
-        assert_unpublished(release)
+        assert_unpublished(release, allow_placeholder=True)
         if release["body"] != notes or release["name"] != VERSION:
             raise ValueError("Existing release notes/title differ; refusing changes")
         release = api.request(f"/releases/{release['id']}", "PATCH",
-                              {"draft": True, "target_commitish": sha})
+                              {"draft": True, "tag_name": VERSION, "target_commitish": sha})
     else:
         release = api.request("/releases", "POST", {"tag_name": VERSION, "name": VERSION,
                               "body": notes, "draft": True, "prerelease": False, "target_commitish": sha})
