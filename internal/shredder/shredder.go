@@ -11,14 +11,32 @@ import (
 )
 
 func ShredFile(path string, iterations int) error {
+	infoBefore, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !infoBefore.Mode().IsRegular() {
+		return errors.New("refusing to shred non-regular file")
+	}
+	linked, err := utils.HasHardLinks(infoBefore, path)
+	if err != nil {
+		return err
+	}
+	if linked {
+		return errors.New("refusing to shred hard linked file")
+	}
 	file, err := os.OpenFile(path, os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
 		return err
+	}
+	if !os.SameFile(infoBefore, info) {
+		return errors.New("file changed before shredding")
 	}
 	bufferSize := int64(1024 * 1024)
 	if info.Size() < bufferSize {

@@ -4,62 +4,52 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"github.com/ndavd/agevault/internal/storage"
 	"io"
 	"os"
-	"path/filepath"
 )
 
-func UnZip(inputReader bytes.Reader, outputDestination string) error {
+func UnZip(inputReader bytes.Reader, outputDestination string, vaultName string) error {
+	return UnZipWithOperations(inputReader, outputDestination, vaultName, storage.OS())
+}
+func UnZipWithOperations(inputReader bytes.Reader, outputDestination, vaultName string, ops storage.Operations) error {
 	reader, err := zip.NewReader(&inputReader, inputReader.Size())
 	if err != nil {
 		return err
 	}
-	destination, err := filepath.Abs(outputDestination)
+	root, err := os.OpenRoot(outputDestination)
 	if err != nil {
 		return err
 	}
+	defer root.Close()
 	for _, f := range reader.File {
-		err := unzipFile(f, destination)
-		if err != nil {
-			return err
+		name, e := safeName(f.Name, vaultName)
+		if e != nil {
+			return e
+		}
+		if f.FileInfo().IsDir() {
+			if e = ops.MkdirAll(root, name, 0700); e != nil {
+				return e
+			}
+			continue
+		}
+		if !f.Mode().IsRegular() {
+			return fmt.Errorf("unsupported archive type for %s", f.Name)
+		}
+		r, e := f.Open()
+		if e != nil {
+			return e
+		}
+		e = extractFile(root, name, r, -1, ops)
+		closeErr := r.Close()
+		if e != nil {
+			return e
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 	}
 	return nil
-}
-
-func unzipFile(f *zip.File, destination string) error {
-	if filepath.IsAbs(f.Name) {
-		return fmt.Errorf("absolute archive path: %s", f.Name)
-	}
-	path := filepath.Join(destination, f.Name)
-	relativePath, err := filepath.Rel(destination, path)
-	if err != nil || relativePath == ".." || len(relativePath) > 2 && relativePath[:3] == ".."+string(os.PathSeparator) {
-		return fmt.Errorf("invalid archive path: %s", f.Name)
-	}
-	if f.FileInfo().IsDir() {
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			return err
-		}
-		return nil
-	}
-	if !f.Mode().IsRegular() {
-		return fmt.Errorf("unsupported archive entry type for %s", f.Name)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
-		return err
-	}
-	destinationFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	defer destinationFile.Close()
-	zippedFile, err := f.Open()
-	if err != nil {
-		return err
-	}
-	defer zippedFile.Close()
-	_, err = io.Copy(destinationFile, zippedFile)
-	return err
 }
 
 func IsZip(r io.Reader) bool {
