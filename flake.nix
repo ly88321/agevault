@@ -37,7 +37,7 @@
           });
           package = (pkgs.buildGo126Module.override { go = secureGo; }) {
             pname = "agevault";
-            version = "1.2.0-fork.1";
+            version = "1.2.0";
             src = ./.;
             vendorHash = "sha256-yt4K+EcoZMJ36E5qolZdbDoeWp1WhVzppVx6nDrFq2s=";
           };

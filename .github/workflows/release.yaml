@@ -1,71 +1,81 @@
-name: Release
+name: Draft release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    name: Package ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            extension: tar.gz
-          - goos: linux
-            goarch: arm64
-            extension: tar.gz
-          - goos: darwin
-            goarch: amd64
-            extension: tar.gz
-          - goos: darwin
-            goarch: arm64
-            extension: tar.gz
-          - goos: windows
-            goarch: amd64
-            extension: zip
-          - goos: windows
-            goarch: arm64
-            extension: zip
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Test
-        run: go test ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check version
+        run: test "$(go run . --version)" = "v1.2.0"
       - name: Build and package
-        shell: bash
-        run: |
-          name="agevault-${{ matrix.goos }}-${{ matrix.goarch }}"
-          binary="agevault"
-          if [ "${{ matrix.goos }}" = "windows" ]; then binary="agevault.exe"; fi
-          GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$binary" .
-          if [ "${{ matrix.extension }}" = "zip" ]; then zip "$name.zip" "$binary"; else tar -czf "$name.tar.gz" "$binary"; fi
+        run: python scripts/package_release.py build ${{ matrix.goos }} ${{ matrix.goarch }} dist
       - uses: actions/upload-artifact@v4
         with:
           name: agevault-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: agevault-*.${{ matrix.extension }}
+          path: dist/*
           if-no-files-found: error
-  publish:
+  checksums:
+    name: Verify packages and checksums
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          path: release
+          path: dist
           merge-multiple: true
-      - name: Create or update GitHub release
+      - name: Validate all six packages and generate SHA-256 manifest
+        run: python scripts/package_release.py checksums dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: dist/*
+          if-no-files-found: error
+  draft:
+    name: Update unpublished draft
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: agevault-draft-v1.2.0
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
+      - name: Wait for main CI and update draft only
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/* --clobber
-          else
-            gh release create "$TAG" release/* --generate-notes
-          fi
+          RELEASE_SHA: ${{ github.sha }}
+        run: python scripts/draft_release.py dist release-notes-v1.2.0.md

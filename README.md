@@ -2,6 +2,12 @@
 
 Encrypt and restore a directory using [age](https://age-encryption.org/). This fork ports upstream [v1.2.0](https://github.com/ndavd/agevault/releases/tag/v1.2.0), while retaining streaming encryption, bounded-memory shredding, atomic ciphertext publication, custom identity paths and older identity formats. Build with Go 1.26.9 or newer.
 
+## Release preparation
+
+The Draft release workflow builds Linux, macOS and Windows packages for amd64 and arm64 on pull requests and main. It verifies the six archives and generates `SHA256SUMS`. Only main runs may update the `v1.2.0` draft, after both main CI workflows pass for the exact commit. The workflow preserves the approved notes in `release-notes-v1.2.0.md`, updates the draft target to that commit and verifies all seven uploaded assets against GitHub's SHA-256 digests. Repeated runs reuse the draft and matching assets; failed uploads can be retried. A stale main commit, existing version tag, published release, changed notes or duplicate release stops the update.
+
+This workflow never creates a Git tag or publishes a release. It can also be run manually on main to retry preparation. Formal publication requires a separate, explicitly authorized operation after reviewing the draft and attachments. Verify downloaded archives with `sha256sum -c SHA256SUMS` before use. Local release regression tests run with `python -m unittest discover -s scripts -p 'test_*.py' -v`.
+
 ## Usage
 
 ```text

@@ -22,7 +22,7 @@ import (
 )
 
 func Version() string {
-	return "v1.2.0-fork.1"
+	return "v1.2.0"
 }
 
 func Usage() {
