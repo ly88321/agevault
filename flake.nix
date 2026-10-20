@@ -40,10 +40,6 @@
             version = "1.2.0-fork.1";
             src = ./.;
             vendorHash = "sha256-yt4K+EcoZMJ36E5qolZdbDoeWp1WhVzppVx6nDrFq2s=";
-            nativeBuildInputs = [ pkgs.installShellFiles ];
-            preInstall = ''
-              installManPage doc/*.1
-            '';
           };
         in
         {
