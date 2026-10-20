@@ -45,10 +45,14 @@ func FileMatchInCwd(match MatcherFunc) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	matched := ""
 	for _, file := range files {
 		if !file.IsDir() && match(file.Name()) {
-			return file.Name(), nil
+			if matched != "" {
+				return "", errors.New("multiple identity files; specify --key")
+			}
+			matched = file.Name()
 		}
 	}
-	return "", nil
+	return matched, nil
 }

@@ -27,11 +27,23 @@
         let
           pkgs = import nixpkgs { inherit system; };
           treefmtEval = treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
-          package = pkgs.buildGoModule {
+          # Keep the locked nixpkgs tree while applying the required Go security patch.
+          secureGo = pkgs.go_1_26.overrideAttrs (_: {
+            version = "1.26.9";
+            src = pkgs.fetchurl {
+              url = "https://go.dev/dl/go1.26.9.src.tar.gz";
+              hash = "sha256-lzXX3Ntls10/pXfwQGRzfAO4nPGitx5uaf4vPG+f1Mo=";
+            };
+          });
+          package = (pkgs.buildGo126Module.override { go = secureGo; }) {
             pname = "agevault";
-            version = "1.1.1";
+            version = "1.2.0-fork.1";
             src = ./.;
-            vendorHash = "sha256-jiSYg4+RLzezW1D1kWxmNoEn0rlbXRzU3BsK16aP0tw=";
+            vendorHash = "sha256-yt4K+EcoZMJ36E5qolZdbDoeWp1WhVzppVx6nDrFq2s=";
+            nativeBuildInputs = [ pkgs.installShellFiles ];
+            preInstall = ''
+              installManPage doc/*.1
+            '';
           };
         in
         {
@@ -40,6 +52,7 @@
             inputsFrom = [ package ];
             packages = with pkgs; [
               gotools
+              ronn
             ];
           };
           fmt = treefmtEval.config.build.check self;

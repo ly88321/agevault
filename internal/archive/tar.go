@@ -30,6 +30,11 @@ func TarDirectory(inputSource string, destinationWriter io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if linked, e := utils.HasHardLinks(info, path); e != nil {
+			return e
+		} else if linked {
+			return fmt.Errorf("hard linked file: %s", path)
+		}
 		if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported file type: %s", path)
 		}
@@ -65,53 +70,36 @@ func TarDirectory(inputSource string, destinationWriter io.Writer) error {
 	return err
 }
 
-func UnTar(input io.Reader, outputDestination string) error {
+func UnTar(input io.Reader, outputDestination string, vaultName string) error {
+	root, err := os.OpenRoot(outputDestination)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	reader := tar.NewReader(input)
-	destination, err := filepath.Abs(outputDestination)
-	if err != nil {
-		return err
-	}
 	for {
-		header, err := reader.Next()
+		h, err := reader.Next()
 		if err == io.EOF {
-			break
+			return nil
 		}
 		if err != nil {
 			return err
 		}
-		err = untarFile(reader, header, destination)
+		name, err := safeName(h.Name, vaultName)
 		if err != nil {
 			return err
 		}
+		switch h.Typeflag {
+		case tar.TypeDir:
+			if err = root.MkdirAll(name, 0700); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err = extractFile(root, name, reader, h.Size); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported archive type for %s", h.Name)
+		}
 	}
-	return nil
-}
-
-func untarFile(r *tar.Reader, h *tar.Header, destination string) error {
-	if filepath.IsAbs(h.Name) {
-		return fmt.Errorf("absolute archive path: %s", h.Name)
-	}
-	path := filepath.Join(destination, h.Name)
-	relativePath, err := filepath.Rel(destination, path)
-	if err != nil || relativePath == ".." || len(relativePath) > 2 && relativePath[:3] == ".."+string(os.PathSeparator) {
-		return fmt.Errorf("invalid archive path: %s", h.Name)
-	}
-	switch h.Typeflag {
-	case tar.TypeDir:
-		return os.MkdirAll(path, 0o700)
-	case tar.TypeReg, tar.TypeRegA:
-		// handled below
-	default:
-		return fmt.Errorf("unsupported archive entry type for %s", h.Name)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
-		return err
-	}
-	destinationFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, h.FileInfo().Mode().Perm())
-	if err != nil {
-		return err
-	}
-	defer destinationFile.Close()
-	_, err = io.CopyN(destinationFile, r, h.Size)
-	return err
 }
