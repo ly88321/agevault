@@ -2,11 +2,29 @@
 
 Encrypt and restore a directory using [age](https://age-encryption.org/). This fork ports upstream [v1.2.0](https://github.com/ndavd/agevault/releases/tag/v1.2.0), while retaining streaming encryption, bounded-memory shredding, atomic ciphertext publication, custom identity paths and older identity formats. Build with Go 1.26.9 or newer.
 
-## Release preparation
+## Downloads and guides
 
-The Draft release workflow builds Linux, macOS and Windows packages for amd64 and arm64 on pull requests and main. It verifies the six archives and generates `SHA256SUMS`. Only main runs may update the `v1.2.0` draft, after both main CI workflows pass for the exact commit. The workflow preserves the approved notes in `release-notes-v1.2.0.md`, updates the draft target to that commit and verifies all seven uploaded assets against GitHub's SHA-256 digests. Repeated runs reuse the draft and matching assets; failed uploads can be retried. A stale main commit, existing version tag, published release, changed notes or duplicate release stops the update.
+- [Windows 中文使用指南（v1.2.0）](docs/windows-v1.2.0.zh-CN.md): download verification, hybrid post-quantum keys, sharing, ciphertext retention and recovery, with PowerShell commands.
+- [v1.2.0 release](https://github.com/ly88321/agevault/releases/tag/v1.2.0) and [SHA256SUMS](https://github.com/ly88321/agevault/releases/download/v1.2.0/SHA256SUMS).
 
-This workflow never creates a Git tag or publishes a release. It can also be run manually on main to retry preparation. Formal publication requires a separate, explicitly authorized operation after reviewing the draft and attachments. Verify downloaded archives with `sha256sum -c SHA256SUMS` before use. Local release regression tests run with `python -m unittest discover -s scripts -p 'test_*.py' -v`.
+| Platform | Intel/AMD 64-bit (amd64) | ARM64 |
+|---|---|---|
+| Windows | [ZIP](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-windows-amd64.zip) | [ZIP](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-windows-arm64.zip) |
+| macOS (Darwin) | [Intel Mac](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-darwin-amd64.tar.gz) | [Apple silicon Mac](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-darwin-arm64.tar.gz) |
+| Linux | [tar.gz](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-linux-amd64.tar.gz) | [tar.gz](https://github.com/ly88321/agevault/releases/download/v1.2.0/agevault-linux-arm64.tar.gz) |
+
+`darwin` is the macOS platform name, so both Mac packages are included in the six release archives. CI tests cover both Intel and Apple silicon macOS runners. The Chinese guide above contains Windows commands.
+
+## Repository layout and automation
+
+The root Go files contain the CLI and its integration/security/recovery tests; `internal/` contains the supporting packages, `testdata/` contains compatibility fixtures, `docs/` contains user guides and release records, and `scripts/` contains reusable packaging tools. Tests beside the CLI are required by Go's package layout and are retained.
+
+There are two maintained workflows:
+
+- **CI** runs the existing Linux, Windows, Intel macOS and Apple silicon macOS tests, Python packaging tests, and Nix package/format checks on main and pull requests.
+- **Build packages** builds and verifies six archives and `SHA256SUMS` when run manually, or when a pull request changes packaging/build inputs. It only uploads Actions artifacts, has read-only repository permissions and cannot create tags or modify releases. Ordinary documentation changes do not trigger packaging.
+
+The completed draft and one-time publication automation is retired. [v1.2.0 release notes and audit record](docs/releases/v1.2.0.md) are archived under `docs/releases/`; the published tag and seven assets remain unchanged. Future formal publication requires separate explicit authorization. Historical Actions logs and completed PRs remain available for audit. Local packaging tests run with `python -m unittest discover -s scripts -p 'test_*.py' -v`.
 
 ## Usage
 
@@ -46,7 +64,7 @@ go vet ./...
 go test -count=1 ./...
 ```
 
-Tests cover original upstream compatibility fixtures; verified fork envelope/metadata migration; stale metadata and standalone external legacy identities; identities moved or symlinked into the vault; classical/hybrid sharing and explicit-key membership; POSIX filename round trips in new and legacy tar/ZIP archives; Windows path rejection; malicious authenticated archives; wrong/cancelled passphrases; corrupted/truncated ciphertext; atomic-write failure; and a 64 MiB streaming round trip. CI runs tests on Linux, macOS and Windows with Go 1.26.9 and 1.27.2. Release publishing remains tag-triggered; this upgrade does not create a release.
+Tests cover original upstream compatibility fixtures; verified fork envelope/metadata migration; stale metadata and standalone external legacy identities; identities moved or symlinked into the vault; classical/hybrid sharing and explicit-key membership; POSIX filename round trips in new and legacy tar/ZIP archives; Windows path rejection; malicious authenticated archives; wrong/cancelled passphrases; corrupted/truncated ciphertext; atomic-write failure; and a 64 MiB streaming round trip. CI runs tests on Linux, macOS and Windows with Go 1.26.9 and 1.27.2. Draft preparation does not create tags or formally publish releases; publication requires a separately authorized operation.
 
 Go 1.26.9 is the minimum because earlier runtimes have a Windows Root directory-creation vulnerability ([GO-2026-6604](https://pkg.go.dev/vuln/GO-2026-6604)).
 
