@@ -1,9 +1,14 @@
-name: Draft release
+name: Build packages
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - '.github/workflows/release.yaml'
+      - 'scripts/package_release.py'
+      - 'scripts/test_package_release.py'
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
   workflow_dispatch:
 permissions:
   contents: read
@@ -53,29 +58,3 @@ jobs:
           name: release-bundle
           path: dist/*
           if-no-files-found: error
-  draft:
-    name: Update unpublished draft
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: checksums
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
-    concurrency:
-      group: agevault-draft-v1.2.0
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-bundle
-          path: dist
-      - name: Wait for main CI and update draft only
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_SHA: ${{ github.sha }}
-        run: python scripts/draft_release.py dist release-notes-v1.2.0.md

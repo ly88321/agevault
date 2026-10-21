@@ -15,11 +15,16 @@ Encrypt and restore a directory using [age](https://age-encryption.org/). This f
 
 `darwin` is the macOS platform name, so both Mac packages are included in the six release archives. CI tests cover both Intel and Apple silicon macOS runners. The Chinese guide above contains Windows commands.
 
-## Release preparation
+## Repository layout and automation
 
-The Draft release workflow builds Linux, macOS and Windows packages for amd64 and arm64 on pull requests and main. It verifies the six archives and generates `SHA256SUMS`. Only main runs may update the `v1.2.0` draft, after both main CI workflows pass for the exact commit. The workflow preserves the approved notes in `release-notes-v1.2.0.md`, updates the draft target to that commit and verifies all seven uploaded assets against GitHub's SHA-256 digests. Repeated runs reuse the draft and matching assets; failed uploads can be retried. A stale main commit, existing version tag, published release, changed notes or duplicate release stops the update.
+The root Go files contain the CLI and its integration/security/recovery tests; `internal/` contains the supporting packages, `testdata/` contains compatibility fixtures, `docs/` contains user guides and release records, and `scripts/` contains reusable packaging tools. Tests beside the CLI are required by Go's package layout and are retained.
 
-This workflow never creates a Git tag or publishes a release. It can also be run manually on main to retry preparation. Formal publication requires a separate, explicitly authorized operation after reviewing the draft and attachments. Verify downloaded archives with `sha256sum -c SHA256SUMS` before use. Local release regression tests run with `python -m unittest discover -s scripts -p 'test_*.py' -v`.
+There are two maintained workflows:
+
+- **CI** runs the existing Linux, Windows, Intel macOS and Apple silicon macOS tests, Python packaging tests, and Nix package/format checks on main and pull requests.
+- **Build packages** builds and verifies six archives and `SHA256SUMS` when run manually, or when a pull request changes packaging/build inputs. It only uploads Actions artifacts, has read-only repository permissions and cannot create tags or modify releases. Ordinary documentation changes do not trigger packaging.
+
+The completed draft and one-time publication automation is retired. [v1.2.0 release notes and audit record](docs/releases/v1.2.0.md) are archived under `docs/releases/`; the published tag and seven assets remain unchanged. Future formal publication requires separate explicit authorization. Historical Actions logs and completed PRs remain available for audit. Local packaging tests run with `python -m unittest discover -s scripts -p 'test_*.py' -v`.
 
 ## Usage
 
